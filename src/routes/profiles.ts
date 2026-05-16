@@ -2,6 +2,7 @@
 //   GET    /                  - paginated list (sort=top|new|hero|featured)
 //   GET    /:id               - detail (includes share_code, viewer_has_liked)
 //   POST   /                  - publish; gated by PublishWindow DO
+//   PATCH  /:id               - owner-only edit of title/description
 //   DELETE /:id               - owner-only soft delete
 
 import { Hono } from 'hono';
@@ -11,10 +12,12 @@ import { checkPublishWindow } from '../middleware/rateLimit';
 import {
   ListProfilesQuery,
   PublishRequest,
+  UpdateProfileRequest,
   type ListProfilesResponse,
   type ProfileDetail,
   type ProfileSummary,
   type PublishResponse,
+  type UpdateProfileResponse,
 } from '../shared/schemas';
 import { newProfileId } from '../db/queries';
 import {
@@ -277,6 +280,91 @@ profileRoutes.post('/', requireAuth, async (c) => {
     heroes: derived.heroes,
   };
   return c.json(response, 201);
+});
+
+profileRoutes.patch('/:id', requireAuth, async (c) => {
+  const user = c.get('user')!;
+  const id = c.req.param('id');
+
+  const body = await c.req.json().catch(() => null);
+  const parsed = UpdateProfileRequest.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: 'invalid body', issues: parsed.error.flatten() }, 400);
+  }
+  const { title, description } = parsed.data;
+  if (title === undefined && description === undefined) {
+    return c.json({ error: 'no fields to update' }, 400);
+  }
+
+  // Load the full row up front so we can authorize, decide what to touch,
+  // and rebuild the full ProfileDetail response in one round-trip path.
+  const row = await c.env.DB
+    .prepare(
+      `SELECT p.id, p.owner_user_id, p.title, p.description, p.has_nsfw, p.mod_count,
+              p.primary_hero, p.like_count, p.is_featured,
+              p.created_at, p.updated_at, p.profile_blob,
+              p.thumbnail_urls, p.heroes,
+              u.id AS owner_id, u.display_name AS owner_name, u.avatar_url AS owner_avatar
+         FROM published_profiles p
+         JOIN users u ON u.id = p.owner_user_id
+        WHERE p.id = ? AND p.deleted_at IS NULL`
+    )
+    .bind(id)
+    .first<{
+      id: string; owner_user_id: string; title: string; description: string | null;
+      has_nsfw: number; mod_count: number; primary_hero: string | null;
+      like_count: number; is_featured: number;
+      created_at: number; updated_at: number; profile_blob: ArrayBuffer;
+      thumbnail_urls: string | null; heroes: string | null;
+      owner_id: string; owner_name: string; owner_avatar: string | null;
+    }>();
+  if (!row) return c.json({ error: 'not found' }, 404);
+  if (row.owner_user_id !== user.id) return c.json({ error: 'not allowed' }, 403);
+
+  const now = Math.floor(Date.now() / 1000);
+  const nextTitle = title ?? row.title;
+  // description can be set, cleared (empty string after trim -> stored as null),
+  // or left alone (undefined -> keep current).
+  let nextDescription: string | null;
+  if (description === undefined) {
+    nextDescription = row.description;
+  } else if (description === null || description.length === 0) {
+    nextDescription = null;
+  } else {
+    nextDescription = description;
+  }
+
+  await c.env.DB
+    .prepare(
+      `UPDATE published_profiles
+          SET title = ?, description = ?, updated_at = ?
+        WHERE id = ?`
+    )
+    .bind(nextTitle, nextDescription, now, id)
+    .run();
+
+  // Mirror GET /:id so the client can swap its cached row in place.
+  const blobBytes = new Uint8Array(row.profile_blob);
+  const shareCode = `${PORTABLE_PROFILE_SHARE_PREFIX}${base64urlEncode(blobBytes)}`;
+  const response: UpdateProfileResponse = {
+    id: row.id,
+    title: nextTitle,
+    description: nextDescription,
+    has_nsfw: row.has_nsfw === 1,
+    mod_count: row.mod_count,
+    primary_hero: row.primary_hero,
+    like_count: row.like_count,
+    is_featured: row.is_featured === 1,
+    created_at: row.created_at,
+    updated_at: now,
+    owner: { id: row.owner_id, display_name: row.owner_name, avatar_url: row.owner_avatar },
+    share_code: shareCode,
+    // PATCH doesn't change like state; the client already knows it.
+    viewer_has_liked: null,
+    thumbnail_urls: parseThumbnailUrls(row.thumbnail_urls),
+    heroes: parseHeroes(row.heroes),
+  };
+  return c.json(response);
 });
 
 profileRoutes.delete('/:id', requireAuth, async (c) => {

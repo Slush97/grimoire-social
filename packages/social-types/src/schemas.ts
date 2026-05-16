@@ -112,6 +112,21 @@ export type PublishRequest = z.infer<typeof PublishRequest>;
 export const PublishResponse = ProfileDetail;
 export type PublishResponse = z.infer<typeof PublishResponse>;
 
+// Update: owner-only patch of human-curated fields on an already-published
+// profile. Both fields are optional individually so a client can change one
+// without sending the other, but at least one must be present (enforced in
+// the route, not the schema, to keep this purely structural).
+export const UpdateProfileRequest = z.object({
+  title: z.string().trim().min(1).max(80).optional(),
+  description: z.string().trim().max(1000).nullable().optional(),
+});
+export type UpdateProfileRequest = z.infer<typeof UpdateProfileRequest>;
+
+// UpdateProfileResponse mirrors PublishResponse: the full row so the client
+// can swap its cached entry without a refetch.
+export const UpdateProfileResponse = ProfileDetail;
+export type UpdateProfileResponse = z.infer<typeof UpdateProfileResponse>;
+
 // ---------- Likes ----------
 
 export const LikeResponse = z.object({
