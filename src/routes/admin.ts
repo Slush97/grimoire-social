@@ -12,6 +12,12 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { Env, Variables } from '../env';
 import { requireAdmin } from '../middleware/auth';
+import {
+  base64urlEncode,
+  derivePortableMetadata,
+  parsePortableProfile,
+  PORTABLE_PROFILE_SHARE_PREFIX,
+} from '../portable/portableProfile';
 
 export const adminRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 adminRoutes.use('*', requireAdmin);
@@ -284,4 +290,123 @@ adminRoutes.post('/users/:id/ban', async (c) => {
       .run();
   }
   return c.json({ ok: true, banned: parsed.data.banned });
+});
+
+// POST /v1/admin/backfill-derived
+//
+// Re-derive `thumbnail_urls` and `heroes` for every non-deleted published
+// profile from its stored `profile_blob`. Idempotent. Use after adding a new
+// derived column so existing rows pick it up without needing each owner to
+// republish (which is rate-gated to 1/10min and impractical for bulk).
+//
+// Walks the table in pages to keep request CPU bounded; the response totals
+// success/skip/fail counts and lists any rows that failed (with the error
+// message so the admin can investigate). NSFW filtering matches the publish
+// path — driven by per-mod hints inside the blob.
+adminRoutes.post('/backfill-derived', async (c) => {
+  const PAGE = 25;
+  let cursorCreatedAt: number | null = null;
+  let cursorId: string | null = null;
+  let updated = 0;
+  let skipped = 0;
+  const failures: Array<{ id: string; error: string }> = [];
+
+  type Row = { id: string; profile_blob: ArrayBuffer; created_at: number };
+  for (;;) {
+    // Keyset pagination on (created_at, id) so we don't drift if rows mutate
+    // mid-walk. Only walks non-deleted rows.
+    const stmt = cursorCreatedAt === null
+      ? c.env.DB
+          .prepare(
+            `SELECT id, profile_blob, created_at
+               FROM published_profiles
+              WHERE deleted_at IS NULL
+              ORDER BY created_at ASC, id ASC
+              LIMIT ?`
+          )
+          .bind(PAGE)
+      : c.env.DB
+          .prepare(
+            `SELECT id, profile_blob, created_at
+               FROM published_profiles
+              WHERE deleted_at IS NULL
+                AND (created_at > ? OR (created_at = ? AND id > ?))
+              ORDER BY created_at ASC, id ASC
+              LIMIT ?`
+          )
+          .bind(cursorCreatedAt, cursorCreatedAt, cursorId, PAGE);
+    const page = await stmt.all<Row>();
+
+    const rows: Row[] = page.results;
+    if (rows.length === 0) break;
+
+    for (const row of rows) {
+      try {
+        // Re-encode the gzipped blob as a share code so we can reuse the
+        // same parser the publish path uses (which enforces inflated size
+        // cap and validates structure).
+        const blobBytes = new Uint8Array(row.profile_blob);
+        const shareCode = `${PORTABLE_PROFILE_SHARE_PREFIX}${base64urlEncode(blobBytes)}`;
+        const portable = await parsePortableProfile(shareCode);
+        const derived = derivePortableMetadata(portable, portable.profile.name);
+        const thumbnailUrlsJson = derived.thumbnail_urls.length > 0
+          ? JSON.stringify(derived.thumbnail_urls)
+          : null;
+        const heroesJson = derived.heroes.length > 0
+          ? JSON.stringify(derived.heroes)
+          : null;
+        await c.env.DB
+          .prepare(
+            `UPDATE published_profiles
+                SET thumbnail_urls = ?, heroes = ?, primary_hero = ?, has_nsfw = ?, mod_count = ?
+              WHERE id = ?`
+          )
+          .bind(
+            thumbnailUrlsJson,
+            heroesJson,
+            derived.primary_hero,
+            derived.has_nsfw ? 1 : 0,
+            derived.mod_count,
+            row.id
+          )
+          .run();
+        updated++;
+      } catch (err) {
+        skipped++;
+        failures.push({
+          id: row.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    const last = rows[rows.length - 1]!;
+    cursorCreatedAt = last.created_at;
+    cursorId = last.id;
+    if (rows.length < PAGE) break;
+  }
+
+  return c.json({
+    ok: true,
+    updated,
+    skipped,
+    failures,
+  });
+});
+
+// POST /v1/admin/reset-publish-window/:user_id
+//
+// Clears the per-user PublishWindowDO state. Use to unblock a stuck publish
+// or report flow (also handy in local dev to bypass the 10-min window
+// without waiting). Idempotent.
+adminRoutes.post('/reset-publish-window/:user_id', async (c) => {
+  const userId = c.req.param('user_id');
+  if (!userId) return c.json({ error: 'missing user_id' }, 400);
+  const id = c.env.PUBLISH_WINDOW.idFromName(userId);
+  const stub = c.env.PUBLISH_WINDOW.get(id);
+  const res = await stub.fetch('https://do.local/reset', { method: 'POST' });
+  if (!res.ok) {
+    return c.json({ error: 'reset failed', status: res.status }, 500);
+  }
+  return c.json({ ok: true, user_id: userId });
 });

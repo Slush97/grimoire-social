@@ -217,6 +217,28 @@ export interface PortableDerived {
   has_nsfw: boolean;
   mod_count: number;
   primary_hero: string | null;
+  // Every distinct hero inferred from mod hints, sorted by mod count
+  // (most-modded hero first). `primary_hero` is always `heroes[0]` when this
+  // is non-empty. Capped at 8 to keep the row width sane.
+  heroes: string[];
+  // First 4 GameBanana mod thumbnails extracted from mod hints, in publish
+  // order. Used by the client to render image-led cards. Empty when the
+  // publisher's profile has no hints with thumbnails.
+  thumbnail_urls: string[];
+}
+
+const MAX_HEROES = 8;
+
+const MAX_THUMBNAIL_URLS = 4;
+const MAX_THUMBNAIL_URL_LEN = 500;
+
+function isSafeImageUrl(s: unknown): s is string {
+  return (
+    typeof s === 'string' &&
+    s.length > 0 &&
+    s.length <= MAX_THUMBNAIL_URL_LEN &&
+    (s.startsWith('https://') || s.startsWith('http://'))
+  );
 }
 
 /** Compute the columns we denormalize for list/sort views. The publish handler
@@ -244,22 +266,36 @@ export function derivePortableMetadata(
     if (hero) tally.set(hero, (tally.get(hero) ?? 0) + 1);
   }
 
-  let primaryHero: string | null = null;
-  if (tally.size > 0) {
-    let bestCount = 0;
-    for (const [hero, count] of tally) {
-      if (count > bestCount) {
-        bestCount = count;
-        primaryHero = hero;
-      }
-    }
-  }
+  // Sort heroes by mod count (descending) for stable ordering; primary is
+  // simply heroes[0] when there's at least one tallied. Falls back to the
+  // profile name / publish title only if no mod hint resolved.
+  const heroes: string[] = Array.from(tally.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([hero]) => hero)
+    .slice(0, MAX_HEROES);
+
+  let primaryHero: string | null = heroes[0] ?? null;
   if (!primaryHero) primaryHero = inferHeroFromTitle(profile.profile.name);
   if (!primaryHero) primaryHero = inferHeroFromTitle(publishTitle);
+
+  // Pull mod thumbnail URLs in publish order. We skip NSFW-flagged mods so
+  // a single nsfw mod doesn't leak through the hero strip on safe-mode
+  // clients — the client also applies hideNsfwPreviews defensively.
+  const thumbnailUrls: string[] = [];
+  for (const mod of mods) {
+    if (thumbnailUrls.length >= MAX_THUMBNAIL_URLS) break;
+    if (mod.hint?.nsfw === true) continue;
+    const url = mod.hint?.thumbnailUrl;
+    if (isSafeImageUrl(url) && !thumbnailUrls.includes(url)) {
+      thumbnailUrls.push(url);
+    }
+  }
 
   return {
     has_nsfw: hasNsfw,
     mod_count: mods.length,
     primary_hero: primaryHero,
+    heroes,
+    thumbnail_urls: thumbnailUrls,
   };
 }

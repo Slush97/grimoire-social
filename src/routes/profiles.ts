@@ -31,6 +31,31 @@ export const profileRoutes = new Hono<{ Bindings: Env; Variables: Variables }>()
 
 const PAGE_SIZE = 20;
 
+/** Decode the JSON-encoded thumbnail_urls column into an array of strings.
+ *  Tolerates malformed rows (returns null) so a single bad row can't 500 the
+ *  whole list response. */
+function parseThumbnailUrls(raw: string | null): string[] | null {
+  return parseJsonStringArray(raw, 4);
+}
+
+/** Same shape as parseThumbnailUrls but used for the heroes column. Keeping
+ *  them factored separately makes future per-column validation easier. */
+function parseHeroes(raw: string | null): string[] | null {
+  return parseJsonStringArray(raw, 8);
+}
+
+function parseJsonStringArray(raw: string | null, max: number): string[] | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    const values = parsed.filter((s): s is string => typeof s === 'string').slice(0, max);
+    return values.length > 0 ? values : null;
+  } catch {
+    return null;
+  }
+}
+
 profileRoutes.get('/', async (c) => {
   const parsed = ListProfilesQuery.safeParse(Object.fromEntries(new URL(c.req.url).searchParams));
   if (!parsed.success) {
@@ -64,7 +89,7 @@ profileRoutes.get('/', async (c) => {
     .prepare(
       `SELECT p.id, p.title, p.description, p.has_nsfw, p.mod_count,
               p.primary_hero, p.like_count, p.is_featured,
-              p.created_at, p.updated_at,
+              p.created_at, p.updated_at, p.thumbnail_urls, p.heroes,
               u.id AS owner_id, u.display_name AS owner_name, u.avatar_url AS owner_avatar
          FROM published_profiles p
          JOIN users u ON u.id = p.owner_user_id
@@ -78,6 +103,7 @@ profileRoutes.get('/', async (c) => {
       has_nsfw: number; mod_count: number; primary_hero: string | null;
       like_count: number; is_featured: number;
       created_at: number; updated_at: number;
+      thumbnail_urls: string | null; heroes: string | null;
       owner_id: string; owner_name: string; owner_avatar: string | null;
     }>();
 
@@ -98,6 +124,8 @@ profileRoutes.get('/', async (c) => {
     created_at: r.created_at,
     updated_at: r.updated_at,
     owner: { id: r.owner_id, display_name: r.owner_name, avatar_url: r.owner_avatar },
+    thumbnail_urls: parseThumbnailUrls(r.thumbnail_urls),
+    heroes: parseHeroes(r.heroes),
   }));
 
   const body: ListProfilesResponse = {
@@ -116,6 +144,7 @@ profileRoutes.get('/:id', async (c) => {
       `SELECT p.id, p.title, p.description, p.has_nsfw, p.mod_count,
               p.primary_hero, p.like_count, p.is_featured,
               p.created_at, p.updated_at, p.profile_blob,
+              p.thumbnail_urls, p.heroes,
               u.id AS owner_id, u.display_name AS owner_name, u.avatar_url AS owner_avatar
          FROM published_profiles p
          JOIN users u ON u.id = p.owner_user_id
@@ -127,6 +156,7 @@ profileRoutes.get('/:id', async (c) => {
       has_nsfw: number; mod_count: number; primary_hero: string | null;
       like_count: number; is_featured: number;
       created_at: number; updated_at: number; profile_blob: ArrayBuffer;
+      thumbnail_urls: string | null; heroes: string | null;
       owner_id: string; owner_name: string; owner_avatar: string | null;
     }>();
   if (!row) return c.json({ error: 'not found' }, 404);
@@ -160,6 +190,8 @@ profileRoutes.get('/:id', async (c) => {
     owner: { id: row.owner_id, display_name: row.owner_name, avatar_url: row.owner_avatar },
     share_code: shareCode,
     viewer_has_liked: viewerHasLiked,
+    thumbnail_urls: parseThumbnailUrls(row.thumbnail_urls),
+    heroes: parseHeroes(row.heroes),
   };
   return c.json(detail);
 });
@@ -206,18 +238,24 @@ profileRoutes.post('/', requireAuth, async (c) => {
 
   const id = newProfileId();
   const now = Math.floor(Date.now() / 1000);
+  const thumbnailUrlsJson = derived.thumbnail_urls.length > 0
+    ? JSON.stringify(derived.thumbnail_urls)
+    : null;
+  const heroesJson = derived.heroes.length > 0
+    ? JSON.stringify(derived.heroes)
+    : null;
   await c.env.DB
     .prepare(
       `INSERT INTO published_profiles
          (id, owner_user_id, title, description, has_nsfw, mod_count,
           primary_hero, profile_blob, like_count, is_featured,
-          created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)`
+          created_at, updated_at, thumbnail_urls, heroes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)`
     )
     .bind(
       id, user.id, title, description ?? null,
       derived.has_nsfw ? 1 : 0, derived.mod_count, derived.primary_hero,
-      blobBytes, now, now
+      blobBytes, now, now, thumbnailUrlsJson, heroesJson
     )
     .run();
 
@@ -235,6 +273,8 @@ profileRoutes.post('/', requireAuth, async (c) => {
     owner: { id: user.id, display_name: user.display_name, avatar_url: user.avatar_url },
     share_code,
     viewer_has_liked: false,
+    thumbnail_urls: derived.thumbnail_urls,
+    heroes: derived.heroes,
   };
   return c.json(response, 201);
 });

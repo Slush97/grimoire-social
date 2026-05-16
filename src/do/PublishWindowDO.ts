@@ -27,6 +27,14 @@ const DAY_SECONDS = 86_400;
 export class PublishWindowDO extends DurableObject {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    // POST /reset clears all stored gates for this user. Wired through the
+    // admin route so moderators can bail out a stuck publish/report flow
+    // (also handy in local dev to bypass the 10-min publish window). No
+    // body required; idempotent.
+    if (url.pathname === '/reset') {
+      await this.ctx.storage.deleteAll();
+      return new Response('ok', { status: 200 });
+    }
     if (url.pathname !== '/check') return new Response('not found', { status: 404 });
     const action = url.searchParams.get('action');
     if (action !== 'publish' && action !== 'report') {

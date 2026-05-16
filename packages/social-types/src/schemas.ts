@@ -28,6 +28,15 @@ export const ProfileSummary = z.object({
   created_at: z.number().int(),
   updated_at: z.number().int(),
   owner: UserPublic,
+  // Up to 4 GameBanana mod thumbnail URLs in publish order; client uses the
+  // first for the card hero strip. Optional + nullable so old client builds
+  // and pre-migration rows both stay valid (ADR-005 additive-only).
+  thumbnail_urls: z.array(z.string()).max(4).nullable().optional(),
+  // Every distinct hero inferred from the published profile's mod hints,
+  // sorted most-modded-first. primary_hero is always heroes[0] when this
+  // has entries. Optional + nullable so pre-migration rows degrade to just
+  // primary_hero on the client.
+  heroes: z.array(z.string()).max(8).nullable().optional(),
 });
 export type ProfileSummary = z.infer<typeof ProfileSummary>;
 

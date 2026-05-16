@@ -16,7 +16,8 @@ meRoutes.get('/', async (c) => {
   const rows = await c.env.DB
     .prepare(
       `SELECT id, title, description, has_nsfw, mod_count, primary_hero,
-              like_count, is_featured, created_at, updated_at
+              like_count, is_featured, created_at, updated_at,
+              thumbnail_urls, heroes
          FROM published_profiles
         WHERE owner_user_id = ? AND deleted_at IS NULL
         ORDER BY created_at DESC`
@@ -33,7 +34,21 @@ meRoutes.get('/', async (c) => {
       is_featured: number;
       created_at: number;
       updated_at: number;
+      thumbnail_urls: string | null;
+      heroes: string | null;
     }>();
+
+  function decodeStringArray(raw: string | null, max: number): string[] | null {
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return null;
+      const values = parsed.filter((s): s is string => typeof s === 'string').slice(0, max);
+      return values.length > 0 ? values : null;
+    } catch {
+      return null;
+    }
+  }
 
   const profiles: ProfileSummary[] = rows.results.map((r) => ({
     id: r.id,
@@ -47,6 +62,8 @@ meRoutes.get('/', async (c) => {
     created_at: r.created_at,
     updated_at: r.updated_at,
     owner: { id: user.id, display_name: user.display_name, avatar_url: user.avatar_url },
+    thumbnail_urls: decodeStringArray(r.thumbnail_urls, 4),
+    heroes: decodeStringArray(r.heroes, 8),
   }));
 
   const body: MeResponse = { user, profiles };

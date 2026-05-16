@@ -125,6 +125,8 @@ async function main(): Promise<void> {
     console.error('  unfeature-profile <id>');
     console.error('  ban-user <user_id> [--reason=...]');
     console.error('  unban-user <user_id>');
+    console.error('  backfill-derived');
+    console.error('  reset-publish-window <user_id>');
     process.exit(2);
   }
 
@@ -174,6 +176,32 @@ async function main(): Promise<void> {
         reason: flagString(parsed.flags, 'reason'),
       });
       console.log(`${banned ? 'banned' : 'unbanned'} user ${id}`);
+      break;
+    }
+    case 'reset-publish-window': {
+      const [id] = requirePositional(parsed, 1, '<user_id>');
+      await call('POST', `/reset-publish-window/${encodeURIComponent(id)}`);
+      console.log(`reset publish window for user ${id}`);
+      break;
+    }
+    case 'backfill-derived': {
+      // Re-derive thumbnail_urls / heroes / has_nsfw / mod_count / primary_hero
+      // for every existing published profile from its stored blob. Useful
+      // after adding a new derived column (no need to ask each owner to
+      // republish, which is rate-gated). Idempotent.
+      const resp = await call<{
+        ok: boolean;
+        updated: number;
+        skipped: number;
+        failures: Array<{ id: string; error: string }>;
+      }>('POST', '/backfill-derived');
+      console.log(`updated ${resp.updated}, skipped ${resp.skipped}`);
+      if (resp.failures.length > 0) {
+        console.log('failures:');
+        for (const f of resp.failures) {
+          console.log(`  ${f.id}: ${f.error}`);
+        }
+      }
       break;
     }
     default:
