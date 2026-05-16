@@ -10,6 +10,7 @@ import { meRoutes } from './routes/me';
 import { profileRoutes } from './routes/profiles';
 import { likeRoutes } from './routes/likes';
 import { reportRoutes } from './routes/reports';
+import { adminRoutes } from './routes/admin';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -28,6 +29,7 @@ app.route('/v1/me', meRoutes);
 app.route('/v1/profiles', profileRoutes);
 app.route('/v1/profiles', likeRoutes);    // /:id/like lives here
 app.route('/v1/profiles', reportRoutes);  // /:id/report lives here
+app.route('/v1/admin', adminRoutes);
 
 app.notFound((c) => c.json({ error: 'not found' }, 404));
 app.onError((err, c) => {
