@@ -1,0 +1,18 @@
+# Copy to `.dev.vars` (gitignored) for local `wrangler dev` runs.
+# `wrangler dev` layers these over wrangler.toml [vars] and treats secrets the
+# same way `wrangler secret put` does in prod.
+
+# Secret: Steam Web API key. Get one at https://steamcommunity.com/dev/apikey
+# Used to fetch display name + avatar after OpenID verifies the SteamID.
+STEAM_API_KEY=replace-with-your-steam-web-api-key
+
+# Secret: long-lived bearer token for the admin CLI. Any random string; just
+# match what you set in $GRIMOIRE_SOCIAL_ADMIN_TOKEN when you run `pnpm admin`.
+ADMIN_TOKEN=dev-admin-token-not-for-prod
+
+# Vars: override prod values so Steam redirects the browser back to your
+# local Worker. STEAM_RETURN_TO must point at an address Steam can reach via
+# the user's browser — localhost works because the redirect is user-side, not
+# server-to-server.
+STEAM_REALM=http://localhost:8787
+STEAM_RETURN_TO=http://localhost:8787/v1/auth/steam/callback
