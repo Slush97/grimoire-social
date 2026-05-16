@@ -394,6 +394,217 @@ adminRoutes.post('/backfill-derived', async (c) => {
   });
 });
 
+// GET /v1/admin/stats
+//
+// Single-shot overview: row counts and 24h activity. Cheap aggregate queries
+// against D1. Consumed by the admin dashboard's home panel.
+export interface AdminStats {
+  users: { total: number; banned: number; new_24h: number };
+  profiles: { total: number; deleted: number; featured: number; new_24h: number };
+  likes: { total: number; new_24h: number };
+  reports: { open: number; total: number; new_24h: number };
+}
+
+adminRoutes.get('/stats', async (c) => {
+  const since24h = Math.floor(Date.now() / 1000) - 86400;
+  const rows = await c.env.DB.batch([
+    c.env.DB.prepare(`SELECT COUNT(*) AS n FROM users`),
+    c.env.DB.prepare(`SELECT COUNT(*) AS n FROM users WHERE banned_at IS NOT NULL`),
+    c.env.DB.prepare(`SELECT COUNT(*) AS n FROM users WHERE created_at >= ?`).bind(since24h),
+    c.env.DB.prepare(`SELECT COUNT(*) AS n FROM published_profiles`),
+    c.env.DB.prepare(`SELECT COUNT(*) AS n FROM published_profiles WHERE deleted_at IS NOT NULL`),
+    c.env.DB.prepare(`SELECT COUNT(*) AS n FROM published_profiles WHERE is_featured = 1 AND deleted_at IS NULL`),
+    c.env.DB.prepare(`SELECT COUNT(*) AS n FROM published_profiles WHERE created_at >= ?`).bind(since24h),
+    c.env.DB.prepare(`SELECT COUNT(*) AS n FROM likes`),
+    c.env.DB.prepare(`SELECT COUNT(*) AS n FROM likes WHERE created_at >= ?`).bind(since24h),
+    c.env.DB.prepare(`SELECT COUNT(*) AS n FROM reports WHERE resolved_at IS NULL`),
+    c.env.DB.prepare(`SELECT COUNT(*) AS n FROM reports`),
+    c.env.DB.prepare(`SELECT COUNT(*) AS n FROM reports WHERE created_at >= ?`).bind(since24h),
+  ]);
+  const n = (i: number): number => (rows[i]?.results?.[0] as { n: number } | undefined)?.n ?? 0;
+  const body: AdminStats = {
+    users:    { total: n(0),  banned: n(1),   new_24h: n(2) },
+    profiles: { total: n(3),  deleted: n(4),  featured: n(5), new_24h: n(6) },
+    likes:    { total: n(7),  new_24h: n(8) },
+    reports:  { open: n(9),   total: n(10),   new_24h: n(11) },
+  };
+  return c.json(body);
+});
+
+// GET /v1/admin/profiles
+//
+// Search + filter the published_profiles table. Lets the admin browse beyond
+// the report queue (e.g. to curate features) without needing direct D1 access.
+//
+// Query params (all optional):
+//   q          - substring match on title (case-insensitive)
+//   hero       - exact match on primary_hero
+//   owner      - exact match on owner_user_id
+//   featured   - 'true' | 'false'
+//   deleted    - 'true' | 'false' | 'any' (default 'false' — hide soft-deleted)
+//   sort       - 'new' | 'top' | 'updated' (default 'new')
+//   page       - 1-indexed
+const ListAdminProfilesQuery = z.object({
+  q: z.string().trim().max(80).optional(),
+  hero: z.string().trim().max(40).optional(),
+  owner: z.string().trim().max(60).optional(),
+  featured: z.enum(['true', 'false']).optional(),
+  deleted: z.enum(['true', 'false', 'any']).default('false'),
+  sort: z.enum(['new', 'top', 'updated']).default('new'),
+  page: z.coerce.number().int().min(1).default(1),
+});
+
+export interface AdminProfileRow {
+  id: string;
+  title: string;
+  owner_user_id: string;
+  owner_name: string | null;
+  owner_steam_id: string | null;
+  primary_hero: string | null;
+  has_nsfw: boolean;
+  mod_count: number;
+  like_count: number;
+  is_featured: boolean;
+  is_deleted: boolean;
+  created_at: number;
+  updated_at: number;
+  thumbnail_urls: string[] | null;
+  heroes: string[] | null;
+  open_reports: number;
+}
+export interface AdminProfilesResponse {
+  page: number;
+  page_size: number;
+  total: number;
+  profiles: AdminProfileRow[];
+}
+
+adminRoutes.get('/profiles', async (c) => {
+  const parsed = ListAdminProfilesQuery.safeParse(
+    Object.fromEntries(new URL(c.req.url).searchParams)
+  );
+  if (!parsed.success) {
+    return c.json({ error: 'invalid query', issues: parsed.error.flatten() }, 400);
+  }
+  const { q, hero, owner, featured, deleted, sort, page } = parsed.data;
+  const offset = (page - 1) * PAGE_SIZE;
+
+  const where: string[] = [];
+  const binds: unknown[] = [];
+  if (deleted === 'false') where.push('p.deleted_at IS NULL');
+  else if (deleted === 'true') where.push('p.deleted_at IS NOT NULL');
+  if (q) {
+    where.push('LOWER(p.title) LIKE ?');
+    binds.push(`%${q.toLowerCase()}%`);
+  }
+  if (hero) {
+    where.push('p.primary_hero = ?');
+    binds.push(hero);
+  }
+  if (owner) {
+    where.push('p.owner_user_id = ?');
+    binds.push(owner);
+  }
+  if (featured === 'true') where.push('p.is_featured = 1');
+  if (featured === 'false') where.push('p.is_featured = 0');
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  const orderSql = sort === 'top'
+    ? 'p.like_count DESC, p.created_at DESC'
+    : sort === 'updated'
+      ? 'p.updated_at DESC'
+      : 'p.created_at DESC';
+
+  const rows = await c.env.DB
+    .prepare(
+      `SELECT p.id, p.title, p.owner_user_id, p.primary_hero, p.has_nsfw,
+              p.mod_count, p.like_count, p.is_featured, p.created_at, p.updated_at,
+              p.deleted_at, p.thumbnail_urls, p.heroes,
+              u.display_name AS owner_name,
+              cred.provider_user_id AS owner_steam_id,
+              (SELECT COUNT(*) FROM reports r
+                 WHERE r.profile_id = p.id AND r.resolved_at IS NULL) AS open_reports
+         FROM published_profiles p
+         LEFT JOIN users u ON u.id = p.owner_user_id
+         LEFT JOIN identity_credentials cred
+                ON cred.user_id = u.id AND cred.provider = 'steam'
+         ${whereSql}
+         ORDER BY ${orderSql}
+         LIMIT ? OFFSET ?`
+    )
+    .bind(...binds, PAGE_SIZE, offset)
+    .all<{
+      id: string; title: string; owner_user_id: string;
+      primary_hero: string | null; has_nsfw: number; mod_count: number;
+      like_count: number; is_featured: number;
+      created_at: number; updated_at: number; deleted_at: number | null;
+      thumbnail_urls: string | null; heroes: string | null;
+      owner_name: string | null; owner_steam_id: string | null;
+      open_reports: number;
+    }>();
+
+  const total = await c.env.DB
+    .prepare(`SELECT COUNT(*) AS n FROM published_profiles p ${whereSql}`)
+    .bind(...binds)
+    .first<{ n: number }>();
+
+  const parseJsonArr = (raw: string | null, max: number): string[] | null => {
+    if (!raw) return null;
+    try {
+      const v = JSON.parse(raw);
+      if (!Array.isArray(v)) return null;
+      const arr = v.filter((s): s is string => typeof s === 'string').slice(0, max);
+      return arr.length > 0 ? arr : null;
+    } catch { return null; }
+  };
+
+  const body: AdminProfilesResponse = {
+    page,
+    page_size: PAGE_SIZE,
+    total: total?.n ?? 0,
+    profiles: rows.results.map((r) => ({
+      id: r.id,
+      title: r.title,
+      owner_user_id: r.owner_user_id,
+      owner_name: r.owner_name,
+      owner_steam_id: r.owner_steam_id,
+      primary_hero: r.primary_hero,
+      has_nsfw: r.has_nsfw === 1,
+      mod_count: r.mod_count,
+      like_count: r.like_count,
+      is_featured: r.is_featured === 1,
+      is_deleted: r.deleted_at !== null,
+      created_at: r.created_at,
+      updated_at: r.updated_at,
+      thumbnail_urls: parseJsonArr(r.thumbnail_urls, 4),
+      heroes: parseJsonArr(r.heroes, 8),
+      open_reports: r.open_reports,
+    })),
+  };
+  return c.json(body);
+});
+
+// POST /v1/admin/profiles/:id/undelete
+//
+// Reverses a soft delete. Used when a ban is overturned or a delete was a
+// mistake. Restores the row; existing report rows stay closed (they were
+// resolved as 'deleted' or 'banned').
+adminRoutes.post('/profiles/:id/undelete', async (c) => {
+  const id = c.req.param('id');
+  const result = await c.env.DB
+    .prepare(
+      `UPDATE published_profiles
+          SET deleted_at = NULL, deletion_reason = NULL, updated_at = ?
+        WHERE id = ? AND deleted_at IS NOT NULL`
+    )
+    .bind(Math.floor(Date.now() / 1000), id)
+    .run();
+  if ((result.meta.changes ?? 0) === 0) {
+    return c.json({ error: 'not found or not deleted' }, 404);
+  }
+  return c.json({ ok: true });
+});
+
 // POST /v1/admin/reset-publish-window/:user_id
 //
 // Clears the per-user PublishWindowDO state. Use to unblock a stuck publish
