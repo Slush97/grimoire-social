@@ -1,0 +1,52 @@
+name = "grimoire-social"
+main = "src/index.ts"
+compatibility_date = "2026-05-01"
+compatibility_flags = ["nodejs_compat"]
+
+# D1: relational source of truth.
+# Run `wrangler d1 create grimoire-social` to generate database_id, then paste it here.
+[[d1_databases]]
+binding = "DB"
+database_name = "grimoire-social"
+database_id = "REPLACE_ME_WITH_REAL_D1_ID"
+migrations_dir = "migrations"
+
+# KV: session token store. 30-day TTL per entry.
+# Run `wrangler kv namespace create SESSIONS` to generate id.
+[[kv_namespaces]]
+binding = "SESSIONS"
+id = "REPLACE_ME_WITH_REAL_KV_ID"
+
+# Rate limiting: high-frequency throttles where 10s/60s windows fit.
+# Cloudflare RL API only supports period = 10 or 60 (verified via docs).
+# Anything longer (publish 1/10min, reports 5/day) goes through PublishWindow DO.
+[[ratelimits]]
+name = "LIKE_RL"
+namespace_id = "1001"
+  [ratelimits.simple]
+  limit = 30
+  period = 60
+
+[[ratelimits]]
+name = "AUTH_RL"
+namespace_id = "1002"
+  [ratelimits.simple]
+  limit = 10
+  period = 60
+
+# Durable Object for arbitrary-window per-user gates (publish + report quotas).
+[[durable_objects.bindings]]
+name = "PUBLISH_WINDOW"
+class_name = "PublishWindowDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PublishWindowDO"]
+
+# Public envvars (non-secret). Set secrets via `wrangler secret put`:
+#   STEAM_API_KEY    Steam Web API key for fetching profile names/avatars
+#   ADMIN_TOKEN      Bearer token for admin CLI
+[vars]
+STEAM_REALM = "https://grimoire-social.workers.dev"
+STEAM_RETURN_TO = "https://grimoire-social.workers.dev/v1/auth/steam/callback"
+SESSION_TTL_SECONDS = "2592000"
