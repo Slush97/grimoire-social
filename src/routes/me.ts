@@ -70,10 +70,9 @@ meRoutes.get('/', async (c) => {
   return c.json(body);
 });
 
-// Max statements per D1 batch. D1's hard ceiling is higher, but staying well
-// under it keeps headroom for the boilerplate statements we always emit
-// (profile soft-delete, likes delete, reports update, credentials delete,
-// user delete).
+// Per-chunk like count. Each entry produces two statements (DELETE + UPDATE),
+// so the per-batch statement count is 2 * ACCOUNT_DELETION_CHUNK — well under
+// D1's batch ceiling at 50 (= 100 statements).
 const ACCOUNT_DELETION_CHUNK = 50;
 
 meRoutes.delete('/', async (c) => {
@@ -81,36 +80,48 @@ meRoutes.delete('/', async (c) => {
   const now = Math.floor(Date.now() / 1000);
 
   // Find every like by this user so we can rebalance like_count one row at a
-  // time. A user who has liked thousands of profiles would blow past a single
-  // D1 batch otherwise — see ACCOUNT_DELETION_CHUNK.
+  // time. A heavy liker would blow past a single D1 batch otherwise.
   const likedRows = await c.env.DB
     .prepare(`SELECT profile_id FROM likes WHERE voter_user_id = ?`)
     .bind(user.id)
     .all<{ profile_id: string }>();
   const likedIds = likedRows.results.map((r) => r.profile_id);
 
-  // Phase 1: like_count rebalancing. Chunked so the batch stays bounded even
-  // for a heavy liker. Each chunk is its own transaction; partial failure
-  // leaves the prior chunks applied, which is preferable to refusing the
-  // whole deletion.
+  // Phase 1: rebalance like_count, chunked. Each chunk pairs the DELETE of
+  // one like row with the matching like_count decrement inside the same
+  // batch, so a chunk is atomic: either both land or both roll back. That
+  // makes a retry safe — the next attempt's SELECT above only finds rows
+  // whose decrement also hasn't been applied yet, so we can't double-count.
+  // Using changes() mirrors the like/unlike endpoint exactly: the UPDATE's
+  // delta reads the row count from the preceding DELETE (0 if the like was
+  // gone by then, 1 normally), and the WHERE guards against underflow.
   for (let i = 0; i < likedIds.length; i += ACCOUNT_DELETION_CHUNK) {
     const slice = likedIds.slice(i, i + ACCOUNT_DELETION_CHUNK);
     await c.env.DB.batch(
-      slice.map((id) =>
+      slice.flatMap((id) => [
+        c.env.DB
+          .prepare(`DELETE FROM likes WHERE profile_id = ? AND voter_user_id = ?`)
+          .bind(id, user.id),
         c.env.DB
           .prepare(
-            `UPDATE published_profiles SET like_count = like_count - 1
-              WHERE id = ? AND like_count > 0`
+            `UPDATE published_profiles
+                SET like_count = like_count - changes()
+              WHERE id = ? AND like_count >= changes()`
           )
-          .bind(id)
-      )
+          .bind(id),
+      ])
     );
   }
 
-  // Phase 2: everything else, in one transaction. We do the credential and
-  // likes deletes explicitly rather than relying on FK ON DELETE CASCADE,
-  // because D1 doesn't guarantee foreign_keys is on per session — the FK
-  // declarations stay as documentation but the deletion code is correct
+  // Phase 2: terminal cleanup, one transaction. The DELETE FROM likes here
+  // is a defensive sweep for rows that landed between Phase 1's SELECT and
+  // now (a concurrent POST /like from another live session). Those rows
+  // contribute a bounded +1 like_count drift each — preferable to leaving
+  // orphaned like rows behind after the user is gone.
+  //
+  // We delete identity_credentials explicitly rather than relying on FK
+  // ON DELETE CASCADE — D1 doesn't guarantee foreign_keys is on per session,
+  // so the FK declarations stay as documentation but the code is correct
   // either way.
   await c.env.DB.batch([
     // Soft-delete this user's published profiles (ADR-014). Keep the
@@ -121,7 +132,7 @@ meRoutes.delete('/', async (c) => {
           WHERE owner_user_id = ? AND deleted_at IS NULL`
       )
       .bind(now, user.id),
-    // Hard-delete their likes.
+    // Catch-all for any like row Phase 1 didn't see (concurrent insert).
     c.env.DB.prepare(`DELETE FROM likes WHERE voter_user_id = ?`).bind(user.id),
     // Mark their open reports as resolved with a flag indicating reporter went away.
     c.env.DB

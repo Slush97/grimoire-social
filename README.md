@@ -40,10 +40,10 @@ To exercise the API end-to-end with the Electron client at `../grimoire`, set `G
 ```bash
 export GRIMOIRE_SOCIAL_URL=http://localhost:8787
 export GRIMOIRE_SOCIAL_ADMIN_TOKEN=$ADMIN_TOKEN   # whatever you put in .dev.vars
-pnpm admin -- list-reports
-pnpm admin -- feature-profile <profile_id>
-pnpm admin -- delete-profile <profile_id> --reason="spam"
-pnpm admin -- ban-user <user_id> --reason="repeat offender"
+pnpm admin list-reports
+pnpm admin feature-profile <profile_id>
+pnpm admin delete-profile <profile_id> --reason="spam"
+pnpm admin ban-user <user_id> --reason="repeat offender"
 ```
 
 ## Deploy
@@ -83,7 +83,7 @@ src/
 packages/
   social-types/         Workspace-shared Zod wire-format (ADR-015)
 cli/
-  admin.ts              grimoire-social-admin CLI (run via `pnpm admin --`)
+  admin.ts              grimoire-social-admin CLI (run via `pnpm admin <cmd>`)
 migrations/
   0001_initial.sql      Initial schema
   0002_admin_reasons.sql Moderator audit columns

@@ -2,13 +2,13 @@
 //
 // grimoire-social-admin — moderation CLI for the Worker at $GRIMOIRE_SOCIAL_URL.
 //
-//   pnpm admin -- list-reports [--status=open|resolved|all] [--page=N] [--json]
-//   pnpm admin -- resolve-report <id> [--reason=...]
-//   pnpm admin -- delete-profile <id> [--reason=...]
-//   pnpm admin -- feature-profile <id>
-//   pnpm admin -- unfeature-profile <id>
-//   pnpm admin -- ban-user <user_id> [--reason=...]
-//   pnpm admin -- unban-user <user_id>
+//   pnpm admin list-reports [--status=open|resolved|all] [--page=N] [--json]
+//   pnpm admin resolve-report <id> [--reason=...]
+//   pnpm admin delete-profile <id> [--reason=...]
+//   pnpm admin feature-profile <id>
+//   pnpm admin unfeature-profile <id>
+//   pnpm admin ban-user <user_id> [--reason=...]
+//   pnpm admin unban-user <user_id>
 //
 // Required env: GRIMOIRE_SOCIAL_URL (base URL, e.g. https://grimoire-social.workers.dev),
 //               GRIMOIRE_SOCIAL_ADMIN_TOKEN (matches ADMIN_TOKEN secret).
@@ -117,7 +117,7 @@ function requirePositional(parsed: Parsed, n: number, hint: string): string[] {
 async function main(): Promise<void> {
   const parsed = parseArgs(process.argv.slice(2));
   if (!parsed) {
-    console.error('usage: pnpm admin -- <command> [args]');
+    console.error('usage: pnpm admin <command> [args]');
     console.error('  list-reports [--status=open|resolved|all] [--page=N] [--json]');
     console.error('  resolve-report <id> [--reason=...]');
     console.error('  delete-profile <id> [--reason=...]');
