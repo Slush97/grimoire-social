@@ -155,7 +155,7 @@ These are scaffolded but not production-ready. Address before public launch.
 1. **Admin CLI.** Not in this repo yet. Will be a small Node script hitting the API with `ADMIN_TOKEN` for `list-reports`, `delete-profile`, `ban-user`, `feature-profile`.
 2. **Pre-launch seed.** Hand-build 10-20 featured profiles before opening signups; without them the Discover feed is empty and dies on first impression (ADR-012).
 3. **GameBanana mod-revalidation cron.** Phase 1.5: weekly job marks profiles whose mods got deleted/archived upstream.
-4. **Shared types extraction (ADR-015).** `src/shared/schemas.ts` plus the hero list in `src/portable/inferHero.ts` are duplicated with the Electron client (`../grimoire`). Move them into a shared package (pnpm workspace) before the lists drift — the hero roster especially, since new Deadlock heroes will land in the client first.
+4. **Hero list drift.** Schemas are now consolidated in `packages/social-types/` (ADR-015 done). The hero roster in `src/portable/inferHero.ts` is still duplicated with `../grimoire/src/lib/lockerUtils.ts`. Decide whether it belongs in `@grimoire/social-types` (it isn't wire format) or its own package — for now, when a new Deadlock hero ships, update both files in the same change.
 
 ## Wrangler config gotchas
 
