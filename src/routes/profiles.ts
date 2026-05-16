@@ -269,6 +269,11 @@ profileRoutes.post('/', requireAuth, async (c) => {
   const heroesJson = derived.heroes.length > 0
     ? JSON.stringify(derived.heroes)
     : null;
+  // Coerce empty-string description to null so the wire shape stays uniform:
+  // older clients sent "" instead of omitting the field, and the UI guard
+  // (`p.description && ...`) treated "" as no description anyway. The PATCH
+  // path already does this; mirror it here.
+  const normalizedDescription = description && description.length > 0 ? description : null;
   await c.env.DB
     .prepare(
       `INSERT INTO published_profiles
@@ -278,7 +283,7 @@ profileRoutes.post('/', requireAuth, async (c) => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)`
     )
     .bind(
-      id, user.id, title, description ?? null,
+      id, user.id, title, normalizedDescription,
       derived.has_nsfw ? 1 : 0, derived.mod_count, derived.primary_hero,
       blobBytes, now, now, thumbnailUrlsJson, heroesJson
     )
@@ -287,7 +292,7 @@ profileRoutes.post('/', requireAuth, async (c) => {
   const response: PublishResponse = {
     id,
     title,
-    description: description ?? null,
+    description: normalizedDescription,
     has_nsfw: derived.has_nsfw,
     mod_count: derived.mod_count,
     primary_hero: derived.primary_hero,

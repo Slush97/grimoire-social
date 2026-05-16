@@ -18,14 +18,31 @@ import {
 
 export const authRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
+// State parameter must be at least 16 chars and only contain the safe URL
+// alphabet. The client mints 32 bytes of entropy hex-encoded (64 chars), but
+// we don't pin the exact format so future clients can extend it.
+const STATE_RE = /^[A-Za-z0-9_-]{16,128}$/;
+
 authRoutes.get('/steam/begin', async (c) => {
   const ip = c.req.header('CF-Connecting-IP') ?? 'unknown';
   const limited = await rateLimitOrFail(c, c.env.AUTH_RL, `auth:${ip}`, 60);
   if (limited) return limited;
 
+  // Optional CSRF nonce minted by the Electron client. We pass it through
+  // openid.return_to so Steam echoes it back on the callback, then forward
+  // it to grimoire://auth/done. The Worker does not store or interpret state
+  // — verification happens client-side against the in-memory pending login.
+  const state = c.req.query('state');
+  if (state !== undefined && !STATE_RE.test(state)) {
+    return c.json({ error: 'invalid state' }, 400);
+  }
+
+  const returnTo = state
+    ? `${c.env.STEAM_RETURN_TO}?state=${encodeURIComponent(state)}`
+    : c.env.STEAM_RETURN_TO;
   const url = buildRedirectUrl({
     realm: c.env.STEAM_REALM,
-    returnTo: c.env.STEAM_RETURN_TO,
+    returnTo,
   });
   // Default to a 302 — works with `<a href>` and BrowserWindow loadURL.
   // Pass ?json=1 if a caller wants the URL back as JSON instead.
@@ -86,9 +103,18 @@ authRoutes.get('/steam/callback', async (c) => {
 
   // Bounce back to the Electron app via a custom-scheme URL the main process
   // intercepts. The desktop app registers `grimoire://` at install time.
+  // If the caller passed a state nonce on /begin, Steam echoes it back via
+  // openid.return_to; we forward it so the client can verify the callback
+  // matches a login it actually initiated (login-CSRF defense — without this
+  // an attacker could trick a victim's Grimoire into adopting the attacker's
+  // freshly-minted session by hand-crafting a grimoire://auth/done URL).
   const target = new URL('grimoire://auth/done');
   target.searchParams.set('token', token);
   target.searchParams.set('expires_at', String(exp));
+  const echoedState = params.get('state');
+  if (echoedState && STATE_RE.test(echoedState)) {
+    target.searchParams.set('state', echoedState);
+  }
   return c.redirect(target.toString(), 302);
 });
 
