@@ -152,11 +152,10 @@ These rules exist because something specific went wrong (or would have) without 
 
 These are scaffolded but not production-ready. Address before public launch.
 
-1. **Port `parsePortableProfile` from the Grimoire client.** Lives in `../grimoire/electron/main/services/profiles/`. Pure JS, no Node deps, should run on Workers as-is. Until ported, `routes/profiles.ts` accepts the `mp1:` blob but uses placeholder derived fields. Marked with `// TODO: derive` comments.
-2. **Hero inference.** `inferHeroFromTitle` in `../grimoire/src/lib/lockerUtils.ts` — port it to populate `primary_hero` at publish time.
-3. **Admin CLI.** Not in this repo yet. Will be a small Node script hitting the API with `ADMIN_TOKEN` for `list-reports`, `delete-profile`, `ban-user`, `feature-profile`.
-4. **Pre-launch seed.** Hand-build 10-20 featured profiles before opening signups; without them the Discover feed is empty and dies on first impression (ADR-012).
-5. **GameBanana mod-revalidation cron.** Phase 1.5: weekly job marks profiles whose mods got deleted/archived upstream.
+1. **Admin CLI.** Not in this repo yet. Will be a small Node script hitting the API with `ADMIN_TOKEN` for `list-reports`, `delete-profile`, `ban-user`, `feature-profile`.
+2. **Pre-launch seed.** Hand-build 10-20 featured profiles before opening signups; without them the Discover feed is empty and dies on first impression (ADR-012).
+3. **GameBanana mod-revalidation cron.** Phase 1.5: weekly job marks profiles whose mods got deleted/archived upstream.
+4. **Shared types extraction (ADR-015).** `src/shared/schemas.ts` plus the hero list in `src/portable/inferHero.ts` are duplicated with the Electron client (`../grimoire`). Move them into a shared package (pnpm workspace) before the lists drift — the hero roster especially, since new Deadlock heroes will land in the client first.
 
 ## Wrangler config gotchas
 
