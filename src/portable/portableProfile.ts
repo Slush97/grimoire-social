@@ -93,10 +93,39 @@ export function base64urlDecode(s: string): Uint8Array {
 
 // ---------- decode / parse ----------
 
-async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
+// Streams the gzip decoder and bails as soon as accumulated bytes exceed
+// MAX_INFLATED_BLOB_BYTES. The previous implementation buffered the whole
+// inflated payload before checking size, which let a 16 KB gzip bomb expand
+// up to ~16 MB in memory before the cap fired. Cancelling the reader on
+// overflow keeps peak memory bounded to roughly the cap.
+async function gunzipWithCap(bytes: Uint8Array, maxBytes: number): Promise<Uint8Array> {
   const stream = new Response(bytes).body!.pipeThrough(new DecompressionStream('gzip'));
-  const buf = await new Response(stream).arrayBuffer();
-  return new Uint8Array(buf);
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        throw new PortableProfileError(
+          `Inflated payload exceeds ${maxBytes} byte cap`
+        );
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
 }
 
 export class PortableProfileError extends Error {
@@ -128,16 +157,11 @@ export async function decodeShareCode(code: string): Promise<string> {
 
   let inflated: Uint8Array;
   try {
-    inflated = await gunzip(compressed);
+    inflated = await gunzipWithCap(compressed, MAX_INFLATED_BLOB_BYTES);
   } catch (err) {
+    if (err instanceof PortableProfileError) throw err;
     throw new PortableProfileError(
       `Invalid gzip payload: ${err instanceof Error ? err.message : String(err)}`
-    );
-  }
-
-  if (inflated.byteLength > MAX_INFLATED_BLOB_BYTES) {
-    throw new PortableProfileError(
-      `Inflated payload ${inflated.byteLength} bytes exceeds ${MAX_INFLATED_BLOB_BYTES} cap`
     );
   }
 
@@ -233,11 +257,15 @@ const MAX_THUMBNAIL_URLS = 4;
 const MAX_THUMBNAIL_URL_LEN = 500;
 
 function isSafeImageUrl(s: unknown): s is string {
+  // HTTPS only. The client CSP blocks http:// images anyway, so accepting
+  // them here would just produce silently-broken cards. Restricting to
+  // https also makes the wire contract less surprising for any future
+  // non-Electron consumer.
   return (
     typeof s === 'string' &&
     s.length > 0 &&
     s.length <= MAX_THUMBNAIL_URL_LEN &&
-    (s.startsWith('https://') || s.startsWith('http://'))
+    s.startsWith('https://')
   );
 }
 
