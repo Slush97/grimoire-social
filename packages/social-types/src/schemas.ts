@@ -9,10 +9,19 @@ import { z } from 'zod';
 
 // ---------- Primitive shapes ----------
 
+// Avatar URLs come from Steam (https://avatars.steamstatic.com/...). We pin
+// the scheme to https so a future provider-misconfig or man-in-the-middle on
+// the Worker can't sneak in a `javascript:` or `http:` URL — the client only
+// uses these in <img src>, but the renderer's CSP already rejects non-https
+// images and we want the contract to be unambiguous.
+const HttpsUrl = z.string().url().refine((u) => u.startsWith('https://'), {
+  message: 'must be https://',
+});
+
 export const UserPublic = z.object({
   id: z.string(),
   display_name: z.string(),
-  avatar_url: z.string().url().nullable(),
+  avatar_url: HttpsUrl.nullable(),
 });
 export type UserPublic = z.infer<typeof UserPublic>;
 
@@ -37,6 +46,11 @@ export const ProfileSummary = z.object({
   // has entries. Optional + nullable so pre-migration rows degrade to just
   // primary_hero on the client.
   heroes: z.array(z.string()).max(8).nullable().optional(),
+  // Whether the current authenticated viewer has liked this profile. Null
+  // when called unauthenticated. Optional+nullable so old server builds
+  // (which didn't surface this on list rows) still validate; the client
+  // treats absent + null identically.
+  viewer_has_liked: z.boolean().nullable().optional(),
 });
 export type ProfileSummary = z.infer<typeof ProfileSummary>;
 

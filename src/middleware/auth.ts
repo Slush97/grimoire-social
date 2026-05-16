@@ -50,13 +50,26 @@ export const requireAuth: MiddlewareHandler<{ Bindings: Env; Variables: Variable
   return;
 };
 
+/** Constant-time string compare. `===` short-circuits on the first differing
+ *  byte and can leak the prefix length via timing under heavy probing — not a
+ *  realistic threat against a 256-bit random token, but the swap is one
+ *  function call and removes the class of issue. */
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < a.length; i++) {
+    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return mismatch === 0;
+}
+
 export const requireAdmin: MiddlewareHandler<{ Bindings: Env; Variables: Variables }> = async (c, next) => {
   const header = c.req.header('Authorization');
   if (!header?.startsWith('Bearer ')) {
     return c.json({ error: 'admin token required' }, 401);
   }
   const token = header.slice(7).trim();
-  if (token !== c.env.ADMIN_TOKEN) {
+  if (!timingSafeEqual(token, c.env.ADMIN_TOKEN)) {
     return c.json({ error: 'admin token required' }, 401);
   }
   await next();

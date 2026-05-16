@@ -36,6 +36,13 @@ authRoutes.get('/steam/begin', async (c) => {
 });
 
 authRoutes.get('/steam/callback', async (c) => {
+  // Throttle by IP. Steam's check_authentication is cheap on our side but
+  // every hit makes us POST to Steam's verifier — abuse here can trip
+  // Steam's own rate limits and lock out real users.
+  const ip = c.req.header('CF-Connecting-IP') ?? 'unknown';
+  const limited = await rateLimitOrFail(c, c.env.AUTH_RL, `authcb:${ip}`, 60);
+  if (limited) return limited;
+
   const params = new URL(c.req.url).searchParams;
   const verified = await verifyCallback(params);
   if (!verified) {

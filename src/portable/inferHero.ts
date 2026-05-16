@@ -62,26 +62,48 @@ function escapeRegex(s: string): string {
   return s.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
 }
 
+// Precompile the match table once per module load. The previous implementation
+// rebuilt up to ~80 RegExp objects per `inferHeroFromTitle` call — on a 100-mod
+// publish that's thousands of compilations per request. Now we pay it once.
+interface HeroMatcher {
+  hero: string;
+  // Multi-word/symbol aliases use substring matching (the regex word boundary
+  // wouldn't match around `&`); everything else uses a precompiled \b...\b.
+  substring: string[];
+  pattern: RegExp | null;
+}
+const HERO_MATCHERS: readonly HeroMatcher[] = (() => {
+  const sorted = [...HERO_NAMES].sort((a, b) => b.length - a.length);
+  return sorted.map((hero) => {
+    const aliases = [hero.toLowerCase(), ...(HERO_ALIASES[hero] ?? [])];
+    const substring: string[] = [];
+    const wordParts: string[] = [];
+    for (const alias of aliases) {
+      if (alias.includes(' ') || alias.includes('&') || alias.includes('+')) {
+        substring.push(alias);
+      } else {
+        wordParts.push(escapeRegex(alias));
+      }
+    }
+    const pattern =
+      wordParts.length > 0
+        ? new RegExp(`\\b(?:${wordParts.join('|')})\\b`, 'i')
+        : null;
+    return { hero, substring, pattern };
+  });
+})();
+
 /** Case-insensitive hero match. Multi-word aliases use substring; single-token
  *  aliases require word boundaries so "Haze ULT" matches "Haze" but "Hazelnut"
  *  does not. Returns the canonical hero name or null. */
 export function inferHeroFromTitle(title: string): string | null {
   if (!title) return null;
   const needle = title.toLowerCase();
-  // Longest first so "Grey Talon" wins over "Grey".
-  const sorted = [...HERO_NAMES].sort((a, b) => b.length - a.length);
-
-  for (const hero of sorted) {
-    const lower = hero.toLowerCase();
-    const aliases = [lower, ...(HERO_ALIASES[hero] ?? [])];
-    for (const alias of aliases) {
-      if (alias.includes(' ') || alias.includes('&') || alias.includes('+')) {
-        if (needle.includes(alias)) return hero;
-      } else {
-        const re = new RegExp(`\\b${escapeRegex(alias)}\\b`, 'i');
-        if (re.test(needle)) return hero;
-      }
+  for (const { hero, substring, pattern } of HERO_MATCHERS) {
+    for (const alias of substring) {
+      if (needle.includes(alias)) return hero;
     }
+    if (pattern && pattern.test(needle)) return hero;
   }
   return null;
 }

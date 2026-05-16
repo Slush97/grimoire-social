@@ -88,19 +88,35 @@ profileRoutes.get('/', async (c) => {
   }
   const where = conditions.join(' AND ');
 
+  // When the request is authenticated we LEFT JOIN the viewer's like rows so
+  // the response can include viewer_has_liked per card without a second
+  // round-trip. The signed-out path skips the join entirely so anonymous
+  // browsing stays cheap.
+  const viewer = c.get('user');
+  const viewerJoin = viewer
+    ? `LEFT JOIN likes vl
+         ON vl.profile_id = p.id AND vl.voter_user_id = ?`
+    : '';
+  const viewerCol = viewer
+    ? ', (vl.profile_id IS NOT NULL) AS viewer_has_liked'
+    : ', NULL AS viewer_has_liked';
+  const viewerBinds = viewer ? [viewer.id] : [];
+
   const rows = await c.env.DB
     .prepare(
       `SELECT p.id, p.title, p.description, p.has_nsfw, p.mod_count,
               p.primary_hero, p.like_count, p.is_featured,
               p.created_at, p.updated_at, p.thumbnail_urls, p.heroes,
               u.id AS owner_id, u.display_name AS owner_name, u.avatar_url AS owner_avatar
+              ${viewerCol}
          FROM published_profiles p
          JOIN users u ON u.id = p.owner_user_id
+         ${viewerJoin}
         WHERE ${where}
         ORDER BY ${orderBy}
         LIMIT ? OFFSET ?`
     )
-    .bind(...binds, PAGE_SIZE, offset)
+    .bind(...viewerBinds, ...binds, PAGE_SIZE, offset)
     .all<{
       id: string; title: string; description: string | null;
       has_nsfw: number; mod_count: number; primary_hero: string | null;
@@ -108,6 +124,7 @@ profileRoutes.get('/', async (c) => {
       created_at: number; updated_at: number;
       thumbnail_urls: string | null; heroes: string | null;
       owner_id: string; owner_name: string; owner_avatar: string | null;
+      viewer_has_liked: number | null;
     }>();
 
   const total = await c.env.DB
@@ -129,6 +146,7 @@ profileRoutes.get('/', async (c) => {
     owner: { id: r.owner_id, display_name: r.owner_name, avatar_url: r.owner_avatar },
     thumbnail_urls: parseThumbnailUrls(r.thumbnail_urls),
     heroes: parseHeroes(r.heroes),
+    viewer_has_liked: viewer ? r.viewer_has_liked === 1 : null,
   }));
 
   const body: ListProfilesResponse = {
@@ -202,10 +220,9 @@ profileRoutes.get('/:id', async (c) => {
 profileRoutes.post('/', requireAuth, async (c) => {
   const user = c.get('user')!;
 
-  // Per-user 10-minute publish gate (ADR-004).
-  const limited = await checkPublishWindow(c, user.id, 'publish');
-  if (limited) return limited;
-
+  // Validate first, then consume the publish window. A malformed body or an
+  // oversized blob should NOT burn the user's 10-minute cooldown — that turned
+  // a typo into a 10-minute lockout in earlier iterations.
   const body = await c.req.json().catch(() => null);
   const parsed = PublishRequest.safeParse(body);
   if (!parsed.success) {
@@ -236,6 +253,11 @@ profileRoutes.post('/', requireAuth, async (c) => {
   if (portable.mods.length > MAX_MODS) {
     return c.json({ error: `mod count ${portable.mods.length} exceeds ${MAX_MODS} cap` }, 400);
   }
+
+  // Per-user 10-minute publish gate (ADR-004). Consumed only after the body
+  // and blob are known to be acceptable, so failures don't lock the user out.
+  const limited = await checkPublishWindow(c, user.id, 'publish');
+  if (limited) return limited;
 
   const derived = derivePortableMetadata(portable, title);
 
