@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      # Wrangler 4 requires Node >= 22. Keep this in step with the version
+      # declared in package.json (we don't currently pin an `engines` field;
+      # consider adding one if the floor changes again).
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Typechecks both the Worker src/ (tsconfig.json) and the admin CLI
+      # (cli/tsconfig.json). The shared @grimoire/social-types package is in
+      # this repo, so no cross-repo checkout dance is needed.
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # Dry-run the deploy bundle to catch wrangler.toml drift and any
+      # accidental Workers-incompatible imports. Doesn't ship anything;
+      # `--dry-run` skips upload to Cloudflare.
+      - name: Wrangler build (dry-run)
+        run: pnpm exec wrangler deploy --dry-run --outdir=/tmp/wrangler-dist
