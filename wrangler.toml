@@ -8,14 +8,14 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "grimoire-social"
-database_id = "REPLACE_ME_WITH_REAL_D1_ID"
+database_id = "07980a37-918b-418a-a5a2-31d27177fc89"
 migrations_dir = "migrations"
 
 # KV: session token store. 30-day TTL per entry.
 # Run `wrangler kv namespace create SESSIONS` to generate id.
 [[kv_namespaces]]
 binding = "SESSIONS"
-id = "REPLACE_ME_WITH_REAL_KV_ID"
+id = "b9b1cac54cd04ad09b7e82db15bf9ecf"
 
 # Rate limiting: high-frequency throttles where 10s/60s windows fit.
 # Cloudflare RL API only supports period = 10 or 60 (verified via docs).
@@ -47,6 +47,6 @@ new_sqlite_classes = ["PublishWindowDO"]
 #   STEAM_API_KEY    Steam Web API key for fetching profile names/avatars
 #   ADMIN_TOKEN      Bearer token for admin CLI
 [vars]
-STEAM_REALM = "https://grimoire-social.workers.dev"
-STEAM_RETURN_TO = "https://grimoire-social.workers.dev/v1/auth/steam/callback"
+STEAM_REALM = "https://grimoire-social.slusheliott.workers.dev"
+STEAM_RETURN_TO = "https://grimoire-social.slusheliott.workers.dev/v1/auth/steam/callback"
 SESSION_TTL_SECONDS = "2592000"
