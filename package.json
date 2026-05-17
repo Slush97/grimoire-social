@@ -13,15 +13,20 @@
     "db:create:local": "wrangler d1 execute grimoire-social --local --command 'SELECT 1'",
     "secret:steam-key": "wrangler secret put STEAM_API_KEY",
     "secret:admin-token": "wrangler secret put ADMIN_TOKEN",
-    "admin": "tsx cli/admin.ts"
+    "admin": "tsx cli/admin.ts",
+    "hash-index": "tsx cli/hash-index/index.ts"
   },
   "dependencies": {
     "hono": "^4.6.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {
+    "7zip-bin": "^5.2.0",
     "@cloudflare/workers-types": "^4.20250101.0",
+    "@types/adm-zip": "^0.5.8",
     "@types/node": "^22.0.0",
+    "adm-zip": "^0.5.17",
+    "node-unrar-js": "^2.0.2",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "wrangler": "^4.92.0"
