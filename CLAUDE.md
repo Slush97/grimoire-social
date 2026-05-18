@@ -95,7 +95,7 @@ These rules exist because something specific went wrong (or would have) without 
 
 - **Server validates every inbound body with Zod from `src/shared/schemas.ts`.** No exceptions.
 - **Never trust client-supplied derived fields.** When publishing, recompute `has_nsfw`, `mod_count`, `primary_hero` server-side from the decoded portable profile. The client may lie or be out of date.
-- Cap blob size after decoding (currently 16 KB). Cap title (80 chars) and description (1000 chars) lengths.
+- Cap blob size after decoding (currently 256 KB). Cap title (80 chars) and description (1000 chars) lengths.
 
 ### Migrations
 

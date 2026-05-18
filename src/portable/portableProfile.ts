@@ -15,8 +15,12 @@ import { inferHeroFromTitle } from './inferHero';
 export const PORTABLE_PROFILE_FORMAT = 'mod-profile';
 export const PORTABLE_PROFILE_SHARE_PREFIX = 'mp1:';
 
-// Matches social-architecture.md §7 publish-time limits.
-export const MAX_INFLATED_BLOB_BYTES = 16 * 1024;
+// Matches social-architecture.md §7 publish-time limits. 256 KB is the same
+// cap the Electron client uses for share-code import; keep them aligned so
+// any profile a user can import is one they can also publish. Sized to fit
+// a worst-case 100-mod Deadlock profile (~70 KB pretty-printed with every
+// hint field) with headroom.
+export const MAX_INFLATED_BLOB_BYTES = 256 * 1024;
 export const MAX_MODS = 100;
 
 export type ModSource = 'gamebanana' | (string & { _open?: never });
