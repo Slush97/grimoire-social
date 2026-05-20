@@ -231,13 +231,14 @@ profileRoutes.post('/', requireAuth, async (c) => {
   const { title, description, share_code } = parsed.data;
 
   // Decompress + validate the share code. The parser enforces the inflated
-  // 16 KB cap; we also keep the compressed-byte cap below as a cheap upstream
-  // gate on storage size.
+  // 256 KB cap; we also keep the compressed-byte cap below as a cheap upstream
+  // gate on storage size (well above any legitimate profile, well below any
+  // memory concern).
   if (!share_code.startsWith(PORTABLE_PROFILE_SHARE_PREFIX)) {
     return c.json({ error: 'unsupported share code format' }, 400);
   }
   const blobBytes = base64urlDecode(share_code.slice(PORTABLE_PROFILE_SHARE_PREFIX.length));
-  if (blobBytes.byteLength > 16 * 1024) {
+  if (blobBytes.byteLength > 64 * 1024) {
     return c.json({ error: 'share code too large' }, 413);
   }
 
