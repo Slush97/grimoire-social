@@ -23,6 +23,12 @@ pnpm secret:steam-key
 pnpm secret:admin-token
 ```
 
+## Nix
+
+`flake.nix` provides a devShell with the toolchain above (`nix develop`).
+On NixOS also enable `programs.nix-ld.enable = true;` so the npm-fetched
+`workerd` binary runs. Setup inside the shell is unchanged.
+
 ## Dev loop
 
 ```bash
