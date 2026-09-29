@@ -47,6 +47,12 @@ export const HERO_NAMES: readonly string[] = [
   'Silver',
   'The Doorman',
   'Venator',
+  'Baba',
+  'Deadman Danny',
+  'Nurse Harrow',
+  'Rat King',
+  'Solomon',
+  'Violet',
 ];
 
 export const HERO_ALIASES: Readonly<Record<string, readonly string[]>> = {
@@ -55,6 +61,9 @@ export const HERO_ALIASES: Readonly<Record<string, readonly string[]>> = {
   'Lady Geist': ['lady geist', 'ladygeist', 'geist'],
   McGinnis: ['mcginnis', 'mc ginnis'],
   Yamato: ['yamato'],
+  'Deadman Danny': ['deadman danny', 'deadman'],
+  'Nurse Harrow': ['nurse harrow', 'harrow'],
+  'Rat King': ['rat king', 'ratking'],
 };
 
 function escapeRegex(s: string): string {
