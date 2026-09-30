@@ -47,6 +47,12 @@ export const HERO_NAMES: readonly string[] = [
   'Silver',
   'The Doorman',
   'Venator',
+  'Baba',
+  'Deadman Danny',
+  'Nurse Harrow',
+  'Rat King',
+  'Solomon',
+  'Violet',
 ];
 
 export const HERO_ALIASES: Readonly<Record<string, readonly string[]>> = {
@@ -55,7 +61,13 @@ export const HERO_ALIASES: Readonly<Record<string, readonly string[]>> = {
   'Lady Geist': ['lady geist', 'ladygeist', 'geist'],
   McGinnis: ['mcginnis', 'mc ginnis'],
   Yamato: ['yamato'],
+  'Rat King': ['rat king', 'ratking'],
 };
+
+// Heroes whose name is also an everyday word in mod titles ("Violet" is a
+// colour: "Patches of Violet on Billy Blasted" is a Billy sound). They only
+// win when no other hero is named in the title.
+const WEAK_HERO_NAMES: ReadonlySet<string> = new Set(['Violet']);
 
 function escapeRegex(s: string): string {
   return s.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
@@ -72,8 +84,10 @@ interface HeroMatcher {
   pattern: RegExp | null;
 }
 const HERO_MATCHERS: readonly HeroMatcher[] = (() => {
-  // Longest hero name first so "Grey Talon" wins over "Grey".
-  const sorted = [...HERO_NAMES].sort((a, b) => b.length - a.length);
+  // Longest hero name first so "Grey Talon" wins over "Grey", with weak names
+  // (see above) after every other hero.
+  const weak = (hero: string) => (WEAK_HERO_NAMES.has(hero) ? 1 : 0);
+  const sorted = [...HERO_NAMES].sort((a, b) => weak(a) - weak(b) || b.length - a.length);
   return sorted.map((hero) => {
     const aliases = [hero.toLowerCase(), ...(HERO_ALIASES[hero] ?? [])];
     const substring: string[] = [];
