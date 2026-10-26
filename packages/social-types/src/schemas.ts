@@ -136,6 +136,13 @@ export const UpdateProfileRequest = z.object({
 });
 export type UpdateProfileRequest = z.infer<typeof UpdateProfileRequest>;
 
+// Content replacement uses a separate endpoint so older Workers reject it
+// rather than silently discarding the share code as an unknown PATCH field.
+export const UpdateProfileContentsRequest = UpdateProfileRequest.extend({
+  share_code: PublishRequest.shape.share_code,
+});
+export type UpdateProfileContentsRequest = z.infer<typeof UpdateProfileContentsRequest>;
+
 // UpdateProfileResponse mirrors PublishResponse: the full row so the client
 // can swap its cached entry without a refetch.
 export const UpdateProfileResponse = ProfileDetail;
