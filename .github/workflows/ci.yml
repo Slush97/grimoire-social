@@ -13,10 +13,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # pnpm 10, matching flake.nix: nixpkgs removed pnpm_9, so the devShell
+      # cannot offer 9 any more. 10 reads the committed lockfile
+      # (lockfileVersion 9.0) unchanged and honors the
+      # pnpm.onlyBuiltDependencies allowlist in package.json.
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10
 
       # Wrangler 4 requires Node >= 22. Keep this in step with the version
       # declared in package.json (we don't currently pin an `engines` field;

@@ -18,15 +18,7 @@
       devShells = forEachSystem (
         system:
         let
-          pkgs = import nixpkgs {
-            inherit system;
-            # pnpm_9 is nixpkgs-flagged insecure at this revision (a handful
-            # of transitive-dependency CVEs). We pin pnpm 9 deliberately to
-            # match this repo's CI and lockfile (see flake.nix comment on
-            # pnpm_9 below); it's dev tooling here, never shipped to users,
-            # so the flag is allowed rather than worked around.
-            config.permittedInsecurePackages = [ "pnpm-9.15.9" ];
-          };
+          pkgs = import nixpkgs { inherit system; };
           lib = pkgs.lib;
 
           nodeVersion = pkgs.nodejs_22.version;
@@ -59,11 +51,14 @@
           default = pkgs.mkShell {
             packages = with pkgs; [
               nodejs_22
-              # pnpm 9, not 10: matches this repo's CI and established
-              # lock/install behavior (this repo has no cross-repo
-              # workspace link of its own, so pnpm 9 is safe here, unlike
-              # in ../grimoire).
-              pnpm_9
+              # pnpm 10, not the 9 this shell used to pin: nixpkgs removed
+              # pnpm_9 on 2026-08-08, so 9 is no longer available to pin.
+              # pnpm 10 reads the committed lockfile (lockfileVersion 9.0)
+              # as is, and ../grimoire's shell already runs 10. pnpm 10 also
+              # gates dependency build scripts, so package.json now lists the
+              # three deps that ship one (esbuild, sharp, workerd) under
+              # pnpm.onlyBuiltDependencies.
+              pnpm_10
               p7zip
               sqlite
               git
