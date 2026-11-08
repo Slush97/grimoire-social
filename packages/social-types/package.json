@@ -14,6 +14,10 @@
     "./heroes": {
       "types": "./src/heroes.ts",
       "default": "./src/heroes.ts"
+    },
+    "./benchmarks": {
+      "types": "./src/benchmarks.ts",
+      "default": "./src/benchmarks.ts"
     }
   },
   "peerDependencies": {
