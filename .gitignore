@@ -8,6 +8,7 @@ cli/hash-index/data/
 .dev.vars.*
 !.dev.vars.example
 dist/
+*.tgz
 *.log
 .DS_Store
 .env

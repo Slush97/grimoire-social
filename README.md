@@ -6,6 +6,8 @@ See `../grimoire/docs/social-architecture.md` and `../grimoire/docs/social-archi
 
 ## First-time setup
 
+Requires Node.js 24+ and pnpm 12 (`package.json` pins pnpm 12 to match `grimoire`).
+
 ```bash
 pnpm install
 
@@ -52,6 +54,30 @@ pnpm admin delete-profile <profile_id> --reason="spam"
 pnpm admin ban-user <user_id> --reason="repeat offender"
 ```
 
+## Publishing `@grimoire/social-types`
+
+`packages/social-types` holds the shared Zod wire-format schemas and hero roster consumed by both this Worker and the `grimoire` desktop app.
+
+`grimoire` consumes `@grimoire/social-types` as a pinned tarball attached to GitHub Releases on this repo, so desktop contributors do not need to clone `grimoire-social`. When you change anything under `packages/social-types/src/`:
+
+1. Bump `"version"` in `packages/social-types/package.json` (e.g. `0.1.0` -> `0.2.0`).
+2. Merge to `main`.
+3. Tag and push `types-vX.Y.Z` (must match `package.json`):
+   ```bash
+   git tag types-v0.2.0
+   git push origin types-v0.2.0
+   ```
+4. The `Release @grimoire/social-types` workflow builds `dist/`, packs `grimoire-social-types-X.Y.Z.tgz`, and attaches it to the GitHub Release.
+5. Update the `@grimoire/social-types` URL in `grimoire/package.json` and run `pnpm install` there.
+
+To test local `packages/social-types` edits inside `grimoire` before tagging a release, run `pnpm build:types` here and link the local package inside `grimoire`:
+
+```bash
+pnpm link ../grimoire-social/packages/social-types
+```
+
+When you are done, remove the local link in `grimoire` with `pnpm unlink @grimoire/social-types` (note that `pnpm link` writes an override to `pnpm-workspace.yaml`, so `pnpm install` alone does not remove it).
+
 ## Deploy
 
 ```bash
@@ -87,7 +113,7 @@ src/
   shared/
     schemas.ts          Re-export shim for packages/social-types/
 packages/
-  social-types/         Workspace-shared Zod wire-format (ADR-015)
+  social-types/         Shared Zod wire-format + hero roster published via `types-v*` releases (ADR-015)
 cli/
   admin.ts              grimoire-social-admin CLI (run via `pnpm admin <cmd>`)
 migrations/

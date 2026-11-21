@@ -11,30 +11,55 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
+        uses: pnpm/action-setup@v6
 
-      # Wrangler 4 requires Node >= 22. Keep this in step with the version
-      # declared in package.json (we don't currently pin an `engines` field;
-      # consider adding one if the floor changes again).
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Lockfile stays a single YAML document
+        run: test "$(grep -c '^---$' pnpm-lock.yaml)" = 0
+
       # Typechecks both the Worker src/ (tsconfig.json) and the admin CLI
-      # (cli/tsconfig.json). The shared @grimoire/social-types package is in
-      # this repo, so no cross-repo checkout dance is needed.
+      # (cli/tsconfig.json).
       - name: Typecheck
         run: pnpm typecheck
+
+      - name: Build and verify @grimoire/social-types package
+        run: |
+          pnpm build:types
+          PKG_VERSION="$(node -p "JSON.parse(require('node:fs').readFileSync('packages/social-types/package.json', 'utf8')).version")"
+          TARBALL="/tmp/social-types-pack/grimoire-social-types-${PKG_VERSION}.tgz"
+          rm -rf /tmp/social-types-pack
+          mkdir -p /tmp/social-types-pack
+          pnpm --dir packages/social-types pack --pack-destination /tmp/social-types-pack
+          test -f "$TARBALL"
+          CONTENTS="$(tar -tzf "$TARBALL")"
+          for expected in \
+            package/package.json \
+            package/dist/schemas.js \
+            package/dist/schemas.d.ts \
+            package/dist/heroes.js \
+            package/dist/heroes.d.ts \
+            package/src/schemas.ts \
+            package/src/heroes.ts; do
+            echo "$CONTENTS" | grep -qx "$expected" || { echo "Missing $expected in $TARBALL" >&2; exit 1; }
+          done
+          tar -xzf "$TARBALL" -C /tmp/social-types-pack
+          ln -s "$PWD/node_modules" /tmp/social-types-pack/package/node_modules
+          node --input-type=module -e "
+            import { ProfileDetail } from '/tmp/social-types-pack/package/dist/schemas.js';
+            import { HERO_NAMES } from '/tmp/social-types-pack/package/dist/heroes.js';
+            if (!ProfileDetail || !Array.isArray(HERO_NAMES) || HERO_NAMES.length === 0) process.exit(1);
+          "
 
       - name: Test
         run: pnpm test

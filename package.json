@@ -4,11 +4,23 @@
   "private": true,
   "description": "Backend service for Grimoire profile sharing and likes",
   "type": "module",
+  "engines": {
+    "pnpm": "12.x"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.x",
+      "onFail": "ignore"
+    }
+  },
   "scripts": {
     "test": "node --import tsx --test test/*.test.mjs",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit && tsc --noEmit -p cli/tsconfig.json",
+    "build:types": "node -e \"import('node:fs').then(fs => fs.rmSync('packages/social-types/dist', { recursive: true, force: true }))\" && tsc -p packages/social-types/tsconfig.json",
+    "pack:types": "pnpm build:types && pnpm --dir packages/social-types pack",
     "db:migrate:local": "wrangler d1 migrations apply grimoire-social --local",
     "db:migrate:remote": "wrangler d1 migrations apply grimoire-social --remote",
     "db:create:local": "wrangler d1 execute grimoire-social --local --command 'SELECT 1'",

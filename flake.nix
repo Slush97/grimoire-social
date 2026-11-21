@@ -20,27 +20,15 @@
         let
           pkgs = import nixpkgs {
             inherit system;
-            # pnpm_9 is nixpkgs-flagged insecure at this revision (a handful
-            # of transitive-dependency CVEs). We pin pnpm 9 deliberately to
-            # match this repo's CI and lockfile (see flake.nix comment on
-            # pnpm_9 below); it's dev tooling here, never shipped to users,
-            # so the flag is allowed rather than worked around.
-            config.permittedInsecurePackages = [ "pnpm-9.15.9" ];
           };
           lib = pkgs.lib;
 
-          nodeVersion = pkgs.nodejs_22.version;
-          nodeVersionOk = lib.versionAtLeast nodeVersion "22.12.0";
-
           # workerd (@cloudflare/workerd-linux-*, npm-fetched, pinned in
           # pnpm-lock.yaml) is a prebuilt dynamically linked binary that
-          # needs nix-ld on NixOS. The pinned workerd (1.20260515.1)
-          # statically links libc++, so it only needs the glibc family that
-          # nix-ld itself supplies as the interpreter; this is a small
-          # supplementary library path, not the full Electron-style closure
-          # grimoire's devShell needs. Running workerd via wrangler
-          # (`pnpm dev`) is the authoritative check, not this list; workerd
-          # is a transitive dep of wrangler, so pnpm exposes no workerd bin.
+          # needs nix-ld on NixOS. The pinned workerd statically links libc++,
+          # so it only needs the glibc family that nix-ld itself supplies as
+          # the interpreter; this is a small supplementary library path, not
+          # the full Electron-style closure grimoire's devShell needs.
           glibcFamilyLibs = with pkgs; [
             stdenv.cc.cc.lib
             zlib
@@ -58,12 +46,8 @@
         {
           default = pkgs.mkShell {
             packages = with pkgs; [
-              nodejs_22
-              # pnpm 9, not 10: matches this repo's CI and established
-              # lock/install behavior (this repo has no cross-repo
-              # workspace link of its own, so pnpm 9 is safe here, unlike
-              # in ../grimoire).
-              pnpm_9
+              nodejs_24
+              pnpm_12
               p7zip
               sqlite
               git
@@ -73,12 +57,6 @@
             shellHook = ''
               # Extend (never replace) the host's nix-ld library path.
               export NIX_LD_LIBRARY_PATH="${lib.makeLibraryPath glibcFamilyLibs}''${NIX_LD_LIBRARY_PATH:+:$NIX_LD_LIBRARY_PATH}"
-
-              if ! ${lib.boolToString nodeVersionOk}; then
-                echo "ERROR: nodejs_22 (${nodeVersion}) is older than the required 22.12.0." >&2
-                echo "  Bump the nixpkgs input." >&2
-                exit 1
-              fi
 
               echo "== grimoire-social devShell diagnostics =="
 
