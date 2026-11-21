@@ -1,21 +1,24 @@
 {
   "name": "@grimoire/social-types",
-  "version": "0.0.0",
-  "private": true,
-  "description": "Shared Zod wire-format schemas for Grimoire Social. Source of truth consumed by both the Worker (grimoire-social) and the Electron client (grimoire).",
+  "version": "0.1.0",
+  "description": "Shared Zod wire-format schemas and hero roster for Grimoire Social and the Grimoire desktop client.",
   "type": "module",
-  "main": "./src/schemas.ts",
-  "types": "./src/schemas.ts",
+  "main": "./dist/schemas.js",
+  "types": "./dist/schemas.d.ts",
   "exports": {
     ".": {
-      "types": "./src/schemas.ts",
-      "default": "./src/schemas.ts"
+      "types": "./dist/schemas.d.ts",
+      "default": "./dist/schemas.js"
     },
     "./heroes": {
-      "types": "./src/heroes.ts",
-      "default": "./src/heroes.ts"
+      "types": "./dist/heroes.d.ts",
+      "default": "./dist/heroes.js"
     }
   },
+  "files": [
+    "dist",
+    "src"
+  ],
   "peerDependencies": {
     "zod": "^3.23.0"
   }

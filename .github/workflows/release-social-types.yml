@@ -1,0 +1,100 @@
+name: Release @grimoire/social-types
+
+on:
+  push:
+    tags:
+      - 'types-v*'
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: 'Create as draft release (only publishes when run on a types-v* tag; branch runs are dry-run only)'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate tag matches package version
+        id: meta
+        run: |
+          PKG_VERSION="$(node -p "JSON.parse(require('node:fs').readFileSync('packages/social-types/package.json', 'utf8')).version")"
+          echo "version=$PKG_VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/types-v* ]]; then
+            TAG_VERSION="${GITHUB_REF_NAME#types-v}"
+            if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+              echo "Tag $GITHUB_REF_NAME does not match packages/social-types/package.json version ($PKG_VERSION)" >&2
+              exit 1
+            fi
+          fi
+
+      - name: Typecheck and test
+        run: |
+          pnpm typecheck
+          pnpm test
+
+      - name: Build, pack, and verify @grimoire/social-types
+        run: |
+          pnpm build:types
+          mkdir -p release-types
+          pnpm --dir packages/social-types pack --pack-destination "$PWD/release-types"
+          TARBALL="grimoire-social-types-${{ steps.meta.outputs.version }}.tgz"
+          test -f "release-types/$TARBALL"
+          CONTENTS="$(tar -tzf "release-types/$TARBALL")"
+          for expected in \
+            package/package.json \
+            package/dist/schemas.js \
+            package/dist/schemas.d.ts \
+            package/dist/heroes.js \
+            package/dist/heroes.d.ts \
+            package/src/schemas.ts \
+            package/src/heroes.ts; do
+            echo "$CONTENTS" | grep -qx "$expected" || { echo "Missing $expected in $TARBALL" >&2; exit 1; }
+          done
+          rm -rf /tmp/social-types-verify && mkdir -p /tmp/social-types-verify
+          tar -xzf "release-types/$TARBALL" -C /tmp/social-types-verify
+          ln -s "$PWD/node_modules" /tmp/social-types-verify/package/node_modules
+          node --input-type=module -e "
+            import { ProfileDetail } from '/tmp/social-types-verify/package/dist/schemas.js';
+            import { HERO_NAMES } from '/tmp/social-types-verify/package/dist/heroes.js';
+            if (!ProfileDetail || !Array.isArray(HERO_NAMES) || HERO_NAMES.length === 0) process.exit(1);
+          "
+          (cd release-types && sha256sum "$TARBALL" > SHA256SUMS)
+          cat release-types/SHA256SUMS
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/types-v')
+        uses: softprops/action-gh-release@v3
+        with:
+          name: "@grimoire/social-types v${{ steps.meta.outputs.version }}"
+          draft: ${{ inputs.draft || false }}
+          generate_release_notes: true
+          body: |
+            Compiled `@grimoire/social-types` package tarball for `grimoire`.
+
+            Install or update in `grimoire/package.json`:
+            ```json
+            "@grimoire/social-types": "https://github.com/Slush97/grimoire-social/releases/download/types-v${{ steps.meta.outputs.version }}/grimoire-social-types-${{ steps.meta.outputs.version }}.tgz"
+            ```
+          files: |
+            release-types/grimoire-social-types-${{ steps.meta.outputs.version }}.tgz
+            release-types/SHA256SUMS

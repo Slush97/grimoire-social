@@ -30,8 +30,8 @@ The ADRs are append-only. If you change a load-bearing decision, write a new ADR
 - **Cloudflare Rate Limit API binding** for high-frequency throttles
 - **Zod** for request/response validation; same schemas exported for client reuse
 - **TypeScript 5** strict; ES2022 modules
-- **wrangler 3** for local dev + deploy
-- **pnpm** for package management
+- **wrangler 4** for local dev + deploy
+- **Node 24+ and pnpm 12** for package management (matching `grimoire`)
 
 ## Project structure
 
@@ -55,7 +55,9 @@ src/
   do/
     PublishWindowDO.ts  Per-user gate: publish 1/10min, report 5/day
   shared/
-    schemas.ts          Zod wire-format (will become @grimoire/social-types)
+    schemas.ts          Re-export shim for packages/social-types/src/schemas.ts
+packages/
+  social-types/         Shared Zod wire-format + hero roster published as GitHub Release tarballs (`types-v*`)
 migrations/
   0001_initial.sql      Initial schema
 wrangler.toml           Worker config (D1, KV, RL, DO bindings)
@@ -71,7 +73,10 @@ pnpm exec wrangler kv namespace create SESSIONS      # Create KV; paste id into 
 pnpm db:migrate:local                                # Apply migrations to local D1
 pnpm db:migrate:remote                               # Apply migrations to prod D1
 pnpm dev                                             # Local Worker on http://localhost:8787
-pnpm typecheck                                       # tsc --noEmit
+pnpm typecheck                                       # tsc --noEmit (Worker + cli/)
+pnpm test                                            # Run unit tests
+pnpm build:types                                     # Compile packages/social-types into dist/
+pnpm pack:types                                      # Build + pack @grimoire/social-types tarball
 pnpm deploy                                          # Ship to Cloudflare
 pnpm secret:steam-key                                # Set STEAM_API_KEY (interactive)
 pnpm secret:admin-token                              # Set ADMIN_TOKEN (interactive)
@@ -155,7 +160,7 @@ These are scaffolded but not production-ready. Address before public launch.
 1. **Admin CLI.** Not in this repo yet. Will be a small Node script hitting the API with `ADMIN_TOKEN` for `list-reports`, `delete-profile`, `ban-user`, `feature-profile`.
 2. **Pre-launch seed.** Hand-build 10-20 featured profiles before opening signups; without them the Discover feed is empty and dies on first impression (ADR-012).
 3. **GameBanana mod-revalidation cron.** Phase 1.5: weekly job marks profiles whose mods got deleted/archived upstream.
-4. **Hero list drift.** Schemas are now consolidated in `packages/social-types/` (ADR-015 done). The hero roster in `src/portable/inferHero.ts` is still duplicated with `../grimoire/src/lib/lockerUtils.ts`. Decide whether it belongs in `@grimoire/social-types` (it isn't wire format) or its own package — for now, when a new Deadlock hero ships, update both files in the same change.
+4. **Shared types publishing.** Wire-format schemas and the hero roster live in `packages/social-types/` and are published to GitHub Releases on `types-v*` tags (`pnpm build:types` + `pnpm pack:types`). Bump `packages/social-types/package.json` version and tag `types-vX.Y.Z` after merging schema or hero changes.
 
 ## Wrangler config gotchas
 
